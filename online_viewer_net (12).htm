@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private P2P Room Chat</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS Library -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        .glass {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col justify-center items-center p-4 font-sans">
+
+    <div class="glass w-full max-w-lg rounded-2xl shadow-2xl flex flex-col h-[85vh] overflow-hidden">
+        
+        <!-- Header -->
+        <div class="p-4 bg-slate-900/80 border-b border-slate-800 flex justify-between items-center">
+            <div>
+                <h1 class="font-bold text-base text-emerald-400">P2P Secure Room Chat</h1>
+                <p id="status-text" class="text-xs text-slate-400">Ready. Choose an option below.</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="call-btn" onclick="toggleAudioCall()" disabled class="hidden px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/40 transition">
+                    📞 Call
+                </button>
+                <button id="export-btn" onclick="exportChatHistory()" disabled class="hidden px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition">
+                    💾 Export
+                </button>
+                <div id="connection-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    Not Joined
+                </div>
+            </div>
+        </div>
+
+        <!-- Call Status Overlay (Hidden initially) -->
+        <div id="call-box" class="hidden p-3 bg-emerald-950/40 border-b border-emerald-800/40 flex items-center justify-between text-xs text-emerald-300">
+            <span id="call-status">Connecting audio call...</span>
+            <button onclick="endAudioCall()" class="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg transition">
+                End Call
+            </button>
+            <audio id="remote-audio" autoplay class="hidden"></audio>
+        </div>
+
+        <!-- Room Controls Panel -->
+        <div id="setup-panel" class="p-4 bg-slate-900/40 border-b border-slate-800/60 flex flex-col gap-3">
+            <div class="flex gap-2">
+                <!-- Host Mode -->
+                <button onclick="createRoom()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl text-xs transition shadow-lg shadow-emerald-900/20">
+                    Create Room (Host)
+                </button>
+                <!-- Client Mode Toggle -->
+                <button onclick="showJoinInput()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl text-xs transition border border-slate-700">
+                    Join Room (Client)
+                </button>
+            </div>
+
+            <!-- Host Room Info -->
+            <div id="host-box" class="hidden flex-col gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                <span class="text-xs text-slate-400">Share this Room Link or 4-Digit Code:</span>
+                <div class="flex gap-2 items-center">
+                    <input id="room-link-display" type="text" readonly class="w-full bg-slate-900 px-3 py-2 rounded-lg text-xs font-mono text-slate-300 border border-slate-800 focus:outline-none">
+                    <button onclick="copyRoomLink()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-medium transition whitespace-nowrap">Copy Link</button>
+                </div>
+                <div class="text-center text-xs text-emerald-400 font-mono font-bold mt-1" id="code-preview"></div>
+            </div>
+
+            <!-- Client Join Input -->
+            <div id="client-box" class="hidden flex-col gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                <span class="text-xs text-slate-400">Enter 4-Digit Room Code:</span>
+                <div class="flex gap-2">
+                    <input id="room-id-input" type="number" maxlength="4" placeholder="Ex: 4829" class="w-full bg-slate-900 px-3 py-2 rounded-lg text-base font-mono text-center tracking-widest border border-slate-800 text-slate-200 focus:border-emerald-500 focus:outline-none">
+                    <button onclick="joinRoom()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium text-white transition">Join</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Messages Box -->
+        <div id="messages" class="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col text-sm">
+            <div class="text-center text-xs text-slate-500 my-auto">Create a room or join one using a short room code.</div>
+        </div>
+
+        <!-- Typing Indicator Banner -->
+        <div id="typing-indicator" class="hidden px-4 py-1 text-xs text-slate-400 italic bg-slate-900/40 border-t border-slate-800/40">
+            Partner is typing...
+        </div>
+
+        <!-- Input Box -->
+        <div class="p-3 bg-slate-900/80 border-t border-slate-800 flex gap-2 items-center">
+            <!-- File Upload Button -->
+            <label id="file-btn-label" class="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl cursor-pointer text-slate-300 transition opacity-50 pointer-events-none">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+                <input type="file" id="file-input" onchange="sendFile(this)" class="hidden" disabled>
+            </label>
+
+            <input id="message-input" type="text" placeholder="Type a message..." disabled class="flex-1 bg-slate-950 px-4 py-2.5 rounded-xl border border-slate-800 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50">
+            <button id="send-btn" onclick="sendMessage()" disabled class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl text-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Send
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let peer = null;
+        let conn = null;
+        let mediaCall = null;
+        let localStream = null;
+        let typingTimeout = null;
+        let chatHistory = [];
+
+        // Check for URL Parameter for Direct Join
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomCode = urlParams.get('room');
+            if (roomCode && roomCode.length === 4) {
+                document.getElementById('room-id-input').value = roomCode;
+                showJoinInput();
+                document.getElementById('status-text').innerText = 'Room code loaded from link! Click Join.';
+            }
+        });
+
+        // Simple 4-Digit Room Code Generator
+        function generateSimpleRoomCode() {
+            return Math.floor(1000 + Math.random() * 9000).toString();
+        }
+
+        // Host Mode: Create Room
+        function createRoom() {
+            if (peer) {
+                try { peer.destroy(); } catch(e) {}
+            }
+            
+            const simpleCode = generateSimpleRoomCode();
+            const internalPeerId = 'simple-p2p-room-' + simpleCode;
+
+            document.getElementById('status-text').innerText = 'Connecting to server...';
+
+            peer = new Peer(internalPeerId, {
+                host: '0.peerjs.com',
+                port: 443,
+                secure: true
+            });
+
+            peer.on('open', () => {
+                document.getElementById('status-text').innerText = 'Room created! Waiting for partner...';
+                const fullLink = window.location.origin + window.location.pathname + '?room=' + simpleCode;
+                document.getElementById('room-link-display').value = fullLink;
+                document.getElementById('code-preview').innerText = "Code: " + simpleCode;
+                document.getElementById('host-box').classList.remove('hidden');
+                document.getElementById('client-box').classList.add('hidden');
+                updateBadge('Waiting...', 'amber');
+            });
+
+            peer.on('connection', (incomingConn) => {
+                conn = incomingConn;
+                setupConnection();
+            });
+
+            peer.on('call', (incomingCall) => {
+                if (confirm('Incoming Voice Call. Accept?')) {
+                    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+                        localStream = stream;
+                        incomingCall.answer(stream);
+                        setupCallEvents(incomingCall);
+                    }).catch(err => alert('Microphone access denied'));
+                }
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    createRoom();
+                } else {
+                    document.getElementById('status-text').innerText = 'Error: ' + err.type;
+                }
+            });
+        }
+
+        function showJoinInput() {
+            document.getElementById('client-box').classList.remove('hidden');
+            document.getElementById('host-box').classList.add('hidden');
+            document.getElementById('status-text').innerText = 'Enter 4-digit code to connect';
+        }
+
+        // Client Mode: Join Room
+        function joinRoom() {
+            const inputCode = document.getElementById('room-id-input').value.trim();
+            if (!inputCode || inputCode.length !== 4) {
+                alert('Please enter a valid 4-digit Room Code');
+                return;
+            }
+
+            if (peer) {
+                try { peer.destroy(); } catch(e) {}
+            }
+
+            const targetPeerId = 'simple-p2p-room-' + inputCode;
+            document.getElementById('status-text').innerText = 'Connecting...';
+
+            peer = new Peer({
+                host: '0.peerjs.com',
+                port: 443,
+                secure: true
+            });
+
+            peer.on('open', () => {
+                conn = peer.connect(targetPeerId);
+                setupConnection();
+            });
+
+            peer.on('call', (incomingCall) => {
+                if (confirm('Incoming Voice Call. Accept?')) {
+                    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+                        localStream = stream;
+                        incomingCall.answer(stream);
+                        setupCallEvents(incomingCall);
+                    }).catch(err => alert('Microphone access denied'));
+                }
+            });
+
+            peer.on('error', (err) => {
+                document.getElementById('status-text').innerText = 'Could not find room code';
+                alert('Room not found or host disconnected.');
+            });
+        }
+
+        // Setup Active Connection
+        function setupConnection() {
+            if (!conn) return;
+
+            conn.on('open', () => {
+                updateBadge('Connected', 'emerald');
+                document.getElementById('status-text').innerText = 'Secure P2P Connection Active';
+                document.getElementById('setup-panel').classList.add('opacity-50', 'pointer-events-none');
+                
+                // Enable inputs & extra controls
+                document.getElementById('message-input').disabled = false;
+                document.getElementById('send-btn').disabled = false;
+                document.getElementById('file-btn-label').classList.remove('opacity-50', 'pointer-events-none');
+                document.getElementById('file-input').disabled = false;
+                document.getElementById('call-btn').classList.remove('hidden');
+                document.getElementById('call-btn').disabled = false;
+                document.getElementById('export-btn').classList.remove('hidden');
+                document.getElementById('export-btn').disabled = false;
+
+                appendSystemMessage('Connected to room!');
+            });
+
+            conn.on('data', (data) => {
+                if (typeof data === 'object' && data.type === 'file') {
+                    appendFileMessage(data, 'received');
+                } else if (typeof data === 'object' && data.type === 'typing') {
+                    showTypingIndicator();
+                } else {
+                    appendMessage(data, 'received');
+                }
+            });
+
+            conn.on('close', () => {
+                updateBadge('Disconnected', 'rose');
+                document.getElementById('status-text').innerText = 'Partner left.';
+                appendSystemMessage('Partner disconnected.');
+                disableChat();
+            });
+        }
+
+        // Send Text Message
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const msg = input.value.trim();
+            if (msg && conn && conn.open) {
+                conn.send(msg);
+                appendMessage(msg, 'sent');
+                input.value = '';
+            }
+        }
+
+        // Send File/Image
+        function sendFile(input) {
+            const file = input.files[0];
+            if (!file || !conn || !conn.open) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileObj = {
+                    type: 'file',
+                    name: file.name,
+                    fileType: file.type,
+                    data: e.target.result
+                };
+                conn.send(fileObj);
+                appendFileMessage(fileObj, 'sent');
+            };
+            reader.readAsDataURL(file);
+            input.value = '';
+        }
+
+        // Typing event handle
+        document.getElementById('message-input').addEventListener('input', () => {
+            if (conn && conn.open) {
+                conn.send({ type: 'typing' });
+            }
+        });
+
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function showTypingIndicator() {
+            const ind = document.getElementById('typing-indicator');
+            ind.classList.remove('hidden');
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => ind.classList.add('hidden'), 2000);
+        }
+
+        // Audio Call Logic
+        function toggleAudioCall() {
+            if (!conn || !conn.peer) return;
+
+            navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+                localStream = stream;
+                mediaCall = peer.call(conn.peer, stream);
+                setupCallEvents(mediaCall);
+            }).catch(err => alert('Microphone permissions required for calls.'));
+        }
+
+        function setupCallEvents(call) {
+            mediaCall = call;
+            document.getElementById('call-box').classList.remove('hidden');
+            document.getElementById('call-status').innerText = 'Audio Call Connected';
+
+            call.on('stream', (remoteStream) => {
+                const audioElem = document.getElementById('remote-audio');
+                audioElem.srcObject = remoteStream;
+            });
+
+            call.on('close', () => endAudioCall());
+        }
+
+        function endAudioCall() {
+            if (mediaCall) mediaCall.close();
+            if (localStream) localStream.getTracks().forEach(track => track.stop());
+            document.getElementById('call-box').classList.add('hidden');
+        }
+
+        // Export Chat History
+        function exportChatHistory() {
+            if (chatHistory.length === 0) {
+                alert('No chat history to export!');
+                return;
+            }
+            const blob = new Blob([chatHistory.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `chat-history-${Date.now()}.txt`;
+            link.click();
+        }
+
+        // UI Utilities
+        function appendMessage(text, type) {
+            const container = document.getElementById('messages');
+            if(container.children.length === 1 && container.children[0].classList.contains('my-auto')) {
+                container.innerHTML = '';
+            }
+
+            chatHistory.push(`[${type.toUpperCase()}]: ${text}`);
+
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex ${type === 'sent' ? 'justify-end' : 'justify-start'}`;
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = type === 'sent' 
+                ? 'bg-emerald-600 text-white px-3.5 py-2 rounded-2xl rounded-tr-none max-w-[75%] break-words shadow'
+                : 'bg-slate-800 text-slate-100 px-3.5 py-2 rounded-2xl rounded-tl-none max-w-[75%] break-words border border-slate-700 shadow';
+
+            msgDiv.textContent = text;
+            wrapper.appendChild(msgDiv);
+            container.appendChild(wrapper);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendFileMessage(fileObj, type) {
+            const container = document.getElementById('messages');
+            if(container.children.length === 1 && container.children[0].classList.contains('my-auto')) {
+                container.innerHTML = '';
+            }
+
+            chatHistory.push(`[${type.toUpperCase()} FILE]: ${fileObj.name}`);
+
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex ${type === 'sent' ? 'justify-end' : 'justify-start'}`;
+
+            const inner = document.createElement('div');
+            inner.className = type === 'sent' 
+                ? 'bg-emerald-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[75%] shadow'
+                : 'bg-slate-800 text-slate-100 p-3 rounded-2xl rounded-tl-none max-w-[75%] border border-slate-700 shadow';
+
+            if (fileObj.fileType && fileObj.fileType.startsWith('image/')) {
+                inner.innerHTML = `<p class="text-xs mb-1 font-semibold">${fileObj.name}</p><img src="${fileObj.data}" class="max-h-48 rounded-lg object-cover">`;
+            } else {
+                inner.innerHTML = `<p class="text-xs mb-1 font-semibold">${fileObj.name}</p><a href="${fileObj.data}" download="${fileObj.name}" class="text-xs underline text-emerald-300">Download File</a>`;
+            }
+
+            wrapper.appendChild(inner);
+            container.appendChild(wrapper);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendSystemMessage(text) {
+            const container = document.getElementById('messages');
+            const sysDiv = document.createElement('div');
+            sysDiv.className = 'text-center text-xs text-emerald-400/80 my-1 font-mono';
+            sysDiv.textContent = `[ System: ${text} ]`;
+            container.appendChild(sysDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateBadge(text, color) {
+            const badge = document.getElementById('connection-badge');
+            if(color === 'emerald') {
+                badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+            } else if(color === 'amber') {
+                badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+            } else {
+                badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20';
+            }
+            badge.innerText = text;
+        }
+
+        function disableChat() {
+            document.getElementById('message-input').disabled = true;
+            document.getElementById('send-btn').disabled = true;
+            document.getElementById('file-btn-label').classList.add('opacity-50', 'pointer-events-none');
+            document.getElementById('call-btn').disabled = true;
+            document.getElementById('export-btn').disabled = true;
+            endAudioCall();
+        }
+
+        function copyRoomLink() {
+            const input = document.getElementById('room-link-display');
+            input.select();
+            navigator.clipboard.writeText(input.value);
+            alert('Room Link Copied!');
+        }
+    </script>
+</body>
+</html>
